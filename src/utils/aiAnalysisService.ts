@@ -45,9 +45,9 @@ export async function runAIBuildingAnalysis(
   const currentFloors = 'levels' in input ? input.levels : ('currentFloors' in input ? input.currentFloors : undefined);
   const currentHeightM = 'heightM' in input ? input.heightM : ('currentHeightM' in input ? input.currentHeightM : undefined);
 
-  // Fast timeout controller (4000ms max so user is never stalled)
+  // Timeout controller (10000ms so Gemini AI API has adequate time to complete)
   const timeoutCtrl = new AbortController();
-  const timer = setTimeout(() => timeoutCtrl.abort(), 4000);
+  const timer = setTimeout(() => timeoutCtrl.abort(), 10000);
 
   const combinedSignal = signal ? signal : timeoutCtrl.signal;
 
@@ -79,7 +79,7 @@ export async function runAIBuildingAnalysis(
           roofCharacteristics: data.roofCharacteristics || 'Flat Reinforced Concrete Roof with Parapet',
           confidenceScore: Number(data.confidenceScore) || 82,
           rationale: data.rationale || 'Synthesized from floorplate envelope and regional building bye-laws.',
-          source: data.source || 'AI Estimated (Gemini 2.5 Flash)',
+          source: data.source || 'AI Estimated (Gemini 3.8 Flash)',
           isEstimated: true,
           authoritativeNotice: 'AI estimates provide volumetric attributes only. Cadastral 2D boundaries are strictly derived from authoritative polygon coordinates without alteration.',
         };
@@ -108,6 +108,24 @@ function synthesizeMorphology(input: BuildingAnalysisInput | OsmBuildingFeature)
   let rationale = 'Synthesized from floorplate dimensions, structural aspect ratio, and regional municipal bye-laws.';
 
   if (
+    rawType.includes('auditorium') ||
+    name.includes('auditorium')
+  ) {
+    resolvedType = 'Auditorium & Cultural Facility';
+    inferredFloors = 3;
+    confidence = 92;
+    roof = 'High-Span Concrete Truss Deck with Acoustic Insulation & Parapet';
+    rationale = 'Auditorium architectural typology with double-height volume and seminar mezzanine.';
+  } else if (
+    rawType.includes('library') ||
+    name.includes('library')
+  ) {
+    resolvedType = 'Institutional Library & Resource Centre';
+    inferredFloors = 4;
+    confidence = 90;
+    roof = 'Reinforced Flat Concrete Roof with Solar Panels & Mechanical Deck';
+    rationale = 'Institutional library typology designed for heavy book stacks and reading halls across 4 levels.';
+  } else if (
     rawType.includes('college') ||
     rawType.includes('university') ||
     rawType.includes('institute') ||
@@ -117,33 +135,45 @@ function synthesizeMorphology(input: BuildingAnalysisInput | OsmBuildingFeature)
     name.includes('institute') ||
     name.includes('college') ||
     name.includes('bnmit') ||
-    name.includes('technology')
+    name.includes('technology') ||
+    name.includes('academy') ||
+    name.includes('block')
   ) {
-    resolvedType = 'Institutional';
-    inferredFloors = 8;
-    confidence = 82;
-    roof = 'Reinforced Flat Concrete Roof with Solar Array & Parapet';
-    rationale = 'Academic block typology identified. Volumetric profile inferred from institutional FAR regulations.';
-  } else if (rawType.includes('commercial') || rawType.includes('office') || area > 1800) {
+    resolvedType = 'Educational Institution (Engineering College)';
+    inferredFloors = area > 1200 ? 5 : (area > 500 ? 5 : 4);
+    confidence = 88;
+    roof = 'Reinforced Flat Concrete Slab with Service Parapet & Rooftop Solar Array';
+    rationale = 'Academic & administration block typology. 5-storey volumetric envelope (Ground + 4) compliant with municipal FAR limits.';
+  } else if (rawType.includes('commercial') || rawType.includes('office')) {
     resolvedType = 'Commercial Complex';
-    inferredFloors = Math.max(4, Math.min(18, Math.round(area / 200)));
+    inferredFloors = area > 2000 ? 8 : (area > 800 ? 6 : 4);
     confidence = 86;
     roof = 'Flat Concrete Deck with Central HVAC & Utility Shafts';
     rationale = 'Commercial office floorplate identified with high occupancy load requirements.';
   } else if (rawType.includes('retail') || rawType.includes('shop')) {
     resolvedType = 'Commercial Retail / Mixed-Use';
-    inferredFloors = Math.max(2, Math.min(6, Math.round(area / 180)));
+    inferredFloors = area > 400 ? 4 : (area > 150 ? 3 : 2);
     confidence = 88;
     roof = 'Commercial Parapet Roof with Utility Access';
     rationale = 'High accessibility commercial podium typology with multi-tenant retail subdivisions.';
-  } else if (area < 200) {
+  } else if (area < 150) {
     resolvedType = 'Low-Rise Residential';
-    inferredFloors = Math.max(1, Math.min(3, Math.round(area / 70)));
+    inferredFloors = 2;
     confidence = 89;
     roof = 'Pitched Terracotta / Concrete Terrace';
     rationale = 'Low-rise individual urban strata parcel with minimal vertical subdivision.';
+  } else if (area < 350) {
+    resolvedType = 'Urban Residential Strata';
+    inferredFloors = 3;
+    confidence = 86;
+    roof = 'Flat Accessible Concrete Roof with Staircase Headroom';
+    rationale = 'Standard urban multi-family residential building (Ground + 2 storeys).';
   } else {
-    inferredFloors = Math.max(3, Math.min(12, Math.round(area / 150)));
+    resolvedType = 'Residential / Mixed-Use Strata';
+    inferredFloors = area > 1000 ? 6 : (area > 500 ? 4 : 3);
+    confidence = 82;
+    roof = 'Flat Reinforced Concrete Roof with Overhead Water Tanks';
+    rationale = 'Mid-rise urban residential/mixed-use strata parcel.';
   }
 
   // Check if tagged levels exists

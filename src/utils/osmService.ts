@@ -369,14 +369,31 @@ export function calculateBuildingAttributes(
     heightM = Number((levels * 3.0).toFixed(1));
     isHeightEstimated = true;
   } else if (levels === 0 && heightM === 0) {
-    // PRIORITY 3: Neither available -> heuristic estimation based on footprint area
-    if (areaSqm > 1200) levels = 10;
-    else if (areaSqm > 600) levels = 6;
-    else if (areaSqm > 300) levels = 4;
-    else if (areaSqm > 150) levels = 3;
-    else levels = 2;
+    // PRIORITY 3: Neither available -> realistic morphology estimation based on regional urban bylaws
+    const isCommercial = tags.building === 'commercial' || tags.office || tags.shop;
+    const isInstitutional = tags.building === 'college' || tags.building === 'university' || tags.building === 'school' || tags.amenity === 'college' || tags.amenity === 'university';
+
+    if (isInstitutional) {
+      if (areaSqm > 1500) levels = 6;
+      else if (areaSqm > 600) levels = 5;
+      else if (areaSqm > 200) levels = 4;
+      else levels = 3;
+      heightM = Number((levels * 3.3).toFixed(1));
+    } else if (isCommercial) {
+      if (areaSqm > 1800) levels = 8;
+      else if (areaSqm > 800) levels = 6;
+      else if (areaSqm > 300) levels = 4;
+      else levels = 3;
+      heightM = Number((levels * 3.4).toFixed(1));
+    } else {
+      // General urban residential / mixed-use strata
+      if (areaSqm > 1500) levels = 6;
+      else if (areaSqm > 600) levels = 4;
+      else if (areaSqm > 200) levels = 3;
+      else levels = 2;
+      heightM = Number((levels * 3.1).toFixed(1));
+    }
     
-    heightM = Number((levels * 3.0).toFixed(1));
     isLevelsEstimated = true;
     isHeightEstimated = true;
   }
@@ -1280,16 +1297,32 @@ function parseOverpassBuildingElements(elements: any[]): { buildings: OsmBuildin
         isLevelsEstimated = false;
       }
     } else {
-      // Heuristic based on footprint area & morphology
-      if (areaSqm > 1800) levels = 12;
-      else if (areaSqm > 900) levels = 8;
-      else if (areaSqm > 400) levels = 5;
-      else if (areaSqm > 150) levels = 3;
-      else levels = 2;
+      // Heuristic based on footprint area & regional urban morphology
+      const isInstitutional = tags.building === 'college' || tags.building === 'university' || tags.building === 'school';
+      const isCommercial = tags.building === 'commercial' || tags.office || tags.shop;
+
+      if (isInstitutional) {
+        if (areaSqm > 1500) levels = 6;
+        else if (areaSqm > 600) levels = 5;
+        else if (areaSqm > 200) levels = 4;
+        else levels = 3;
+      } else if (isCommercial) {
+        if (areaSqm > 1800) levels = 8;
+        else if (areaSqm > 800) levels = 6;
+        else if (areaSqm > 300) levels = 4;
+        else levels = 3;
+      } else {
+        // Residential / mixed-use standard
+        if (areaSqm > 1500) levels = 6;
+        else if (areaSqm > 600) levels = 4;
+        else if (areaSqm > 200) levels = 3;
+        else levels = 2;
+      }
     }
 
     // Estimate / parse building height
-    let heightM = levels * 3.2;
+    const floorHeightMultiplier = (tags.building === 'commercial' || tags.office) ? 3.4 : (tags.building === 'college' ? 3.3 : 3.1);
+    let heightM = Number((levels * floorHeightMultiplier).toFixed(1));
     let isHeightEstimated = true;
     if (tags.height) {
       const parsed = parseFloat(tags.height.toString().replace('m', '').trim());
@@ -1351,25 +1384,58 @@ function parseOverpassBuildingElements(elements: any[]): { buildings: OsmBuildin
     let buildingName = directName;
     if (!buildingName) {
       if (matchedCampus) {
-        // User directive: Distinguish campus blocks:
-        // BNMIT Campus ├── Academic Block ├── Administrative Block ├── Laboratory Block ├── Library └── Other Buildings
-        let blockSuffix = 'Campus Wing';
-        if (el.id === 1271217720 || (validPoints.length >= 7 && areaSqm > 1000)) {
-          blockSuffix = 'Academic & Laboratory Block';
-        } else if (el.id === 315336703 || (tags.building === 'college' && areaSqm > 500)) {
-          blockSuffix = 'Administrative Block';
-        } else if (el.id === 315336704 || (tags.building === 'college')) {
-          blockSuffix = 'Science & Technology Wing';
-        } else if (el.id === 1271217721 || (areaSqm > 250 && areaSqm <= 450)) {
-          blockSuffix = 'Library & Auditorium Block';
-        } else if (areaSqm > 800) {
-          blockSuffix = 'Academic Block';
+        const isBnmit = matchedCampus.name.toLowerCase().includes('bnm');
+        if (isBnmit) {
+          // Precise building identification based on official campus layout & Google Maps
+          if (el.id === 1271217720 || (validPoints.length >= 7 && centroid.lat > 12.9218 && centroid.lng < 77.5675)) {
+            // Academy & Administration Block (Central Main Block shown in Google Maps)
+            buildingName = `${matchedCampus.name} - Academy & Administration Block`;
+            humanReadableType = 'Educational Institution (Engineering College)';
+            if (isLevelsEstimated) { levels = 5; heightM = 16.5; }
+          } else if (el.id === 315336703 || (centroid.lat > 12.9220 && centroid.lng < 77.5669)) {
+            // BNM Auditorium to the northwest
+            buildingName = 'BNM Auditorium';
+            humanReadableType = 'Auditorium & Cultural Facility';
+            if (isLevelsEstimated) { levels = 3; heightM = 12.5; }
+          } else if (el.id === 1271217722 || centroid.lat < 12.9212) {
+            // New Building to the south
+            buildingName = `${matchedCampus.name} - New Building`;
+            humanReadableType = 'Academic Classrooms & Labs';
+            if (isLevelsEstimated) { levels = 5; heightM = 16.5; }
+          } else if (el.id === 1271217721 || (centroid.lat > 12.9218 && centroid.lng >= 77.5676)) {
+            // Central Library & Information Centre
+            buildingName = `${matchedCampus.name} - Central Library & Information Centre`;
+            humanReadableType = 'Institutional Library & Resource Centre';
+            if (isLevelsEstimated) { levels = 4; heightM = 13.5; }
+          } else if (el.id === 315336704 || (centroid.lat <= 12.9218 && centroid.lng >= 77.5676)) {
+            // Science & Computing Wing
+            buildingName = `${matchedCampus.name} - Science & Computing Wing`;
+            humanReadableType = 'Department of Computer Science & Labs';
+            if (isLevelsEstimated) { levels = 4; heightM = 13.5; }
+          } else {
+            buildingName = `${matchedCampus.name} - Campus Wing #${el.id.toString().slice(-4)}`;
+            if (isLevelsEstimated) { levels = 4; heightM = 13.2; }
+          }
         } else {
-          blockSuffix = `Block #${el.id.toString().slice(-4)}`;
+          // Other institutional campuses: realistic block suffixes
+          let blockSuffix = 'Campus Wing';
+          if (areaSqm > 1200) {
+            blockSuffix = 'Main Academic Block';
+            if (isLevelsEstimated) { levels = 5; heightM = 16.5; }
+          } else if (areaSqm > 600) {
+            blockSuffix = 'Department Block';
+            if (isLevelsEstimated) { levels = 4; heightM = 13.5; }
+          } else if (areaSqm > 300) {
+            blockSuffix = 'Library & Resource Centre';
+            if (isLevelsEstimated) { levels = 3; heightM = 10.5; }
+          } else {
+            blockSuffix = `Wing #${el.id.toString().slice(-4)}`;
+            if (isLevelsEstimated) { levels = 2; heightM = 7.0; }
+          }
+          buildingName = `${matchedCampus.name} - ${blockSuffix}`;
         }
-        buildingName = `${matchedCampus.name} - ${blockSuffix}`;
       } else if (enclosingContextArea) {
-        const suffix = areaSqm > 800 ? 'Main Academic Facility' : `Wing #${el.id.toString().slice(-4)}`;
+        const suffix = areaSqm > 800 ? 'Main Facility' : `Wing #${el.id.toString().slice(-4)}`;
         buildingName = `${enclosingContextArea.name} - ${suffix}`;
       } else if (tags['addr:street']) {
         const houseNo = tags['addr:housenumber'] ? `${tags['addr:housenumber']} ` : '';

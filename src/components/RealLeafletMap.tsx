@@ -99,10 +99,10 @@ const PRESET_LOCATIONS: { name: string; query: string; lat: number; lng: number;
   { 
     name: 'BNM Institute of Technology', 
     query: 'BNM Institute of Technology Bengaluru', 
-    lat: 12.9219, 
-    lng: 77.5678, 
+    lat: 12.92197, 
+    lng: 77.56725, 
     zoom: 18,
-    desc: 'Engineering college campus in Banashankari Stage II'
+    desc: 'Academy & Administration Block, Banashankari Stage II'
   },
   { 
     name: 'Basavanagudi', 
@@ -416,7 +416,20 @@ export const RealLeafletMap: React.FC<RealLeafletMapProps> = ({
           const aiAnalysis = await runAIBuildingAnalysis(topCandidate.building);
           if (currentGeneration !== searchGenerationRef.current) return;
 
-          const createdParcel = createCadastreFromOsmBuilding(topCandidate.building, {
+          let finalTopBuilding = topCandidate.building;
+          if (aiAnalysis && aiAnalysis.estimatedFloors) {
+            setCustomFloors(aiAnalysis.estimatedFloors);
+            setCustomHeight(aiAnalysis.estimatedHeightM);
+            finalTopBuilding = {
+              ...topCandidate.building,
+              levels: aiAnalysis.estimatedFloors,
+              heightM: aiAnalysis.estimatedHeightM,
+              buildingType: aiAnalysis.buildingType || topCandidate.building.buildingType,
+            };
+            setSelectedOsmBuilding(finalTopBuilding);
+          }
+
+          const createdParcel = createCadastreFromOsmBuilding(finalTopBuilding, {
             floors: aiAnalysis.estimatedFloors,
             heightM: aiAnalysis.estimatedHeightM,
             aiAnalysis,
@@ -432,12 +445,12 @@ export const RealLeafletMap: React.FC<RealLeafletMapProps> = ({
           onAcquisitionStateChange?.({
             status: 'polygon_found',
             locationCoords: { lat, lng },
-            locationName: queryName || topCandidate.building.name,
+            locationName: queryName || finalTopBuilding.name,
             searchRadiusM: currentRadius,
             osmFootprintsCount: result.buildings.length,
             candidates,
             selectedBuilding: createdParcel.buildings[0],
-            selectedOsmBuilding: topCandidate.building,
+            selectedOsmBuilding: finalTopBuilding,
             selectionMethod: topCandidate.selectionMethod,
             responseTimeMs: result.responseTimeMs,
             endpointUsed: result.endpointUsed,
@@ -1327,11 +1340,14 @@ export const RealLeafletMap: React.FC<RealLeafletMapProps> = ({
       });
 
       // Click selection handler
-      polygon.on('click', (e) => {
+      polygon.on('click', async (e) => {
         L.DomEvent.stopPropagation(e);
         setSelectedOsmBuilding(bldg);
+        setCustomFloors(bldg.levels);
+        setCustomHeight(bldg.heightM);
         onSelectOsmBuilding?.(bldg);
         onSelectBuilding(`OSM-${bldg.id}`);
+        updateSelectionMarker(bldg.centroid.lat, bldg.centroid.lng, bldg.name);
         setPoiResolution(null);
         setOsmNotification(null);
         setDebugStatus(prev => ({ 
@@ -1340,6 +1356,52 @@ export const RealLeafletMap: React.FC<RealLeafletMapProps> = ({
           selectionMethod: 'MANUAL',
           matchDistanceM: 0,
         }));
+
+        try {
+          const aiAnalysis = await runAIBuildingAnalysis(bldg);
+          if (aiAnalysis && aiAnalysis.estimatedFloors) {
+            setCustomFloors(aiAnalysis.estimatedFloors);
+            setCustomHeight(aiAnalysis.estimatedHeightM);
+            const updated = {
+              ...bldg,
+              levels: aiAnalysis.estimatedFloors,
+              heightM: aiAnalysis.estimatedHeightM,
+              buildingType: aiAnalysis.buildingType || bldg.buildingType,
+            };
+            setSelectedOsmBuilding(prev => (prev && prev.id === bldg.id ? updated : prev));
+            const createdParcel = createCadastreFromOsmBuilding(updated, {
+              floors: aiAnalysis.estimatedFloors,
+              heightM: aiAnalysis.estimatedHeightM,
+              aiAnalysis,
+            }, {
+              source: 'REAL_OSM',
+              matchMethod: 'MANUAL_MAP_SELECTION',
+              confidenceLevel: 'High',
+              confidence: aiAnalysis.confidenceScore,
+              isSynthetic: false,
+              osmTimeoutOccurred: false,
+            });
+
+            onAcquisitionStateChange?.({
+              status: 'polygon_found',
+              locationCoords: { lat: bldg.centroid.lat, lng: bldg.centroid.lng },
+              locationName: bldg.name,
+              searchRadiusM: 100,
+              osmFootprintsCount: osmBuildings.length,
+              selectedBuilding: createdParcel.buildings[0],
+              selectedOsmBuilding: updated,
+              selectionMethod: 'MANUAL',
+              responseTimeMs: 30,
+              source: 'OSM',
+              isUsingFallback: false,
+              osmTimeoutOccurred: false,
+              aiAnalysis,
+              badge: 'REAL OSM DATA',
+            });
+          }
+        } catch (err) {
+          console.warn('AI analysis on polygon click error:', err);
+        }
       });
 
       osmGroup.addLayer(polygon);
@@ -2315,25 +2377,37 @@ export const RealLeafletMap: React.FC<RealLeafletMapProps> = ({
                           {/* Suggested Campus Names chips if nearby */}
                           {nearbyCampus && (
                             <div className="text-[10px] pt-1.5 border-t border-slate-800/80">
-                              <span className="text-slate-400 block mb-1 text-[9.5px]">Detected Campus Quick-Assign:</span>
+                              <span className="text-slate-400 block mb-1 text-[9.5px]">Campus Block Quick-Assign:</span>
                               <div className="flex flex-wrap gap-1">
                                 <button
-                                  onClick={() => handleSaveBuildingName(nearbyCampus.name)}
+                                  onClick={() => handleSaveBuildingName(`${nearbyCampus.name} - Academy & Administration Block`)}
                                   className="px-2 py-0.5 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 rounded border border-amber-500/40 text-[10px] transition cursor-pointer"
                                 >
-                                  {nearbyCampus.name}
+                                  Academy & Admin Block
                                 </button>
                                 <button
-                                  onClick={() => handleSaveBuildingName(`${nearbyCampus.name} - Academic Block`)}
+                                  onClick={() => handleSaveBuildingName('BNM Auditorium')}
+                                  className="px-2 py-0.5 bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 rounded border border-emerald-500/40 text-[10px] transition cursor-pointer"
+                                >
+                                  BNM Auditorium
+                                </button>
+                                <button
+                                  onClick={() => handleSaveBuildingName(`${nearbyCampus.name} - Central Library & Information Centre`)}
                                   className="px-2 py-0.5 bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 rounded border border-sky-500/40 text-[10px] transition cursor-pointer"
                                 >
-                                  Academic Block
+                                  Central Library
                                 </button>
                                 <button
-                                  onClick={() => handleSaveBuildingName(`${nearbyCampus.name} - Department Wing`)}
+                                  onClick={() => handleSaveBuildingName(`${nearbyCampus.name} - New Building`)}
                                   className="px-2 py-0.5 bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 rounded border border-purple-500/40 text-[10px] transition cursor-pointer"
                                 >
-                                  Department Wing
+                                  New Building
+                                </button>
+                                <button
+                                  onClick={() => handleSaveBuildingName(`${nearbyCampus.name} - Science & Computing Wing`)}
+                                  className="px-2 py-0.5 bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 rounded border border-indigo-500/40 text-[10px] transition cursor-pointer"
+                                >
+                                  Science & Computing
                                 </button>
                               </div>
                             </div>
@@ -2438,8 +2512,11 @@ export const RealLeafletMap: React.FC<RealLeafletMapProps> = ({
                         value={customFloors}
                         onChange={(e) => {
                           const f = parseInt(e.target.value, 10);
+                          const floorH = selectedOsmBuilding?.buildingType?.toLowerCase().includes('institutional') || selectedOsmBuilding?.buildingType?.toLowerCase().includes('education') || selectedOsmBuilding?.buildingType?.toLowerCase().includes('college') ? 3.3 : (selectedOsmBuilding?.buildingType?.toLowerCase().includes('commercial') ? 3.4 : 3.1);
+                          const h = Number((f * floorH).toFixed(1));
                           setCustomFloors(f);
-                          setCustomHeight(Number((f * 3.2).toFixed(1)));
+                          setCustomHeight(h);
+                          setSelectedOsmBuilding(prev => prev ? { ...prev, levels: f, heightM: h } : prev);
                         }}
                         className="w-full accent-amber-500 bg-slate-800 h-1.5 rounded-lg cursor-pointer"
                       />

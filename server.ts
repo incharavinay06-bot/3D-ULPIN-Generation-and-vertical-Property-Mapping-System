@@ -7,7 +7,14 @@ let aiClient: GoogleGenAI | null = null;
 function getGenAI(): GoogleGenAI | null {
   if (!aiClient && process.env.GEMINI_API_KEY) {
     try {
-      aiClient = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+      aiClient = new GoogleGenAI({
+        apiKey: process.env.GEMINI_API_KEY,
+        httpOptions: {
+          headers: {
+            "User-Agent": "aistudio-build",
+          },
+        },
+      });
     } catch (e) {
       console.warn("Failed to initialize GoogleGenAI client:", e);
     }
@@ -54,23 +61,28 @@ async function startServer() {
 
       if (ai) {
         try {
-          const prompt = `You are a cadastral GIS and urban morphology AI assistant for SIH26011 (3D ULPIN & Vertical Property Mapping System).
+          const prompt = `You are an expert cadastral GIS and urban morphology AI architect for SIH26011 (3D ULPIN & Vertical Property Mapping System).
 Analyze this urban building footprint:
 - Identified Name: ${name || "Urban Building"}
 - Known / Tagged Type: ${rawType}
 - Footprint Area: ${area} m²
 - Polygon Vertices Count: ${verticesCount || 4}
 - Provided OSM Tags: ${JSON.stringify(osmTags || {})}
-- Current Estimated Floors: ${floors}
-- Current Estimated Height: ${height}m
+- Input Floor Baseline: ${floors} storeys (~${height}m)
 
-Provide an expert architectural estimation:
-1. Building Type: (e.g. "Residential Multi-Storey", "Commercial IT Complex", "Mixed-Use Retail/Residential", "Civic / Institutional", "High-Density Residential")
-2. Estimated Number of Floors: realistic integer based on typology and footprint
-3. Estimated Building Height (in meters): realistic float (typically 3.0m - 3.5m per floor plus roof parapet)
-4. Roof Characteristics: (e.g. "Flat Reinforced Concrete with Service Parapet & Solar Readiness", "Terraced Accessible Roof", "Gabled Metal Truss")
-5. Confidence Score (integer between 65 and 95)
-6. Typology Rationale: (concise 1-2 sentence explanation)
+Predict realistic architectural volumetric attributes according to regional municipal building bylaws (BBMP / National Building Code of India):
+1. Building Type: Specific classification (e.g. "Educational Institution (Engineering College)", "Academy & Administration Block", "Commercial Complex", "Residential Apartment", "Mixed-Use Retail/Residential", "Auditorium & Cultural Facility")
+2. Estimated Number of Floors: Realistic integer. Note:
+   - Indian engineering college & university campus academic/admin blocks are typically 4 to 6 storeys (Ground + 3 to Ground + 5, usually 5 floors).
+   - Campus auditoriums are typically 2 to 3 storeys (high ceiling, ~12.5m).
+   - Campus libraries are typically 3 to 4 storeys (~13.5m).
+   - Standalone urban houses are 2 to 3 storeys.
+   - Mid-rise residential apartments are 4 to 5 storeys.
+   - High-density commercial tech parks are 6 to 12 storeys.
+3. Estimated Building Height (in meters): Realistic float (typically 3.2m - 3.4m per floor for institutional/commercial + roof parapet, e.g. 5 floors ≈ 16.5m).
+4. Roof Characteristics: (e.g. "Flat Reinforced Concrete Slab with Service Parapet & Rooftop Solar PV", "High-Span Acoustic Truss Deck", "Terraced Accessible Roof Deck")
+5. Confidence Score: Integer between 70 and 95.
+6. Typology Rationale: Clear 1-2 sentence architectural justification explaining why this floor count and typology fits this building footprint and urban context.
 
 IMPORTANT:
 - Output strictly valid JSON matching this schema:
@@ -84,27 +96,54 @@ IMPORTANT:
 }
 Do not include markdown code block ticks (\`\`\`json). Just the raw JSON object.`;
 
-          const response = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
-            contents: prompt,
-            config: {
-              responseMimeType: "application/json",
-              temperature: 0.2,
-            },
-          });
+          const candidateModels = ["gemini-3.1-flash-lite", "gemini-3.6-flash", "gemini-3.8-flash", "gemini-flash-latest"];
+          let parsed: any = null;
+          let usedModel = candidateModels[0];
 
-          const text = response.text?.trim();
-          if (text) {
-            const parsed = JSON.parse(text);
+          for (const model of candidateModels) {
+            try {
+              const response = await ai.models.generateContent({
+                model,
+                contents: prompt,
+                config: {
+                  responseMimeType: "application/json",
+                  temperature: 0.2,
+                },
+              });
+              const text = response.text?.trim();
+              if (text) {
+                parsed = JSON.parse(text);
+                usedModel = model;
+                break;
+              }
+            } catch (err: any) {
+              console.warn(`Model ${model} unavailable (${err?.message || err}). Trying next model...`);
+            }
+          }
+
+          if (parsed) {
+            const modelDisplayNames: Record<string, string> = {
+              "gemini-3.1-flash-lite": "Gemini 3.1 Flash Lite",
+              "gemini-3.6-flash": "Gemini 3.6 Flash",
+              "gemini-3.8-flash": "Gemini 3.8 Flash",
+              "gemini-flash-latest": "Gemini Flash",
+            };
+            const formattedModelName = modelDisplayNames[usedModel] || "Gemini AI";
+            let rawScore = Number(parsed.confidenceScore) || 88;
+            if (rawScore > 0 && rawScore <= 1) {
+              rawScore = Math.round(rawScore * 100);
+            }
+            const confidenceScore = Math.min(95, Math.max(60, rawScore));
+
             return res.json({
               success: true,
-              source: "AI Estimated (Gemini 2.5 Flash)",
+              source: `AI Estimated (${formattedModelName})`,
               isEstimated: true,
               buildingType: parsed.buildingType || rawType,
               estimatedFloors: Number(parsed.estimatedFloors) || floors,
               estimatedHeightM: Number(parsed.estimatedHeightM) || height,
               roofCharacteristics: parsed.roofCharacteristics || "Flat Concrete Roof with HVAC Parapet",
-              confidenceScore: Math.min(95, Math.max(60, Number(parsed.confidenceScore) || 88)),
+              confidenceScore,
               rationale: parsed.rationale || "Inferred from footprint dimensions, structural aspect ratio, and urban building morphology.",
               authoritativeNotice: "AI estimates provide volumetric attributes only. Cadastral 2D boundaries are strictly derived from authoritative polygon coordinates without alteration.",
             });
