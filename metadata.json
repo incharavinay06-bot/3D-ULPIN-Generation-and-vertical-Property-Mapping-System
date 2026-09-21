@@ -1,0 +1,8 @@
+{
+  "name": "3D ULPIN & Vertical Property Mapping System",
+  "description": "Prototype system for 3D Cadastral Property Mapping, 2D-to-3D ULPIN Generation vertical transformation, multi-level unit segmentation, and 3D boundary validation (SIH26011).",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

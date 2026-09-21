@@ -1,0 +1,22 @@
+# Render Blueprint configuration for 3D ULPIN & Vertical Property Mapping System
+# See https://render.com/docs/blueprint-spec for documentation
+
+services:
+  - type: web
+    name: 3d-ulpin-mapping
+    runtime: static
+    buildCommand: npm run build
+    staticPublishPath: ./dist
+    pullRequestPreviewsEnabled: true
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+    routes:
+      # SPA rewrite rule so that direct links and refreshes resolve to index.html
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
